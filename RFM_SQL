@@ -1,0 +1,86 @@
+--- step 1 - append all monthly sales tables together
+ create table `intense-palace-341711.Sales.Sales_2025` AS
+ Select * from `intense-palace-341711.Sales.jan`
+ UNION ALL  Select * from `intense-palace-341711.Sales.feb`
+ UNION ALL  Select * from `intense-palace-341711.Sales.mar`
+ UNION ALL  Select * from `intense-palace-341711.Sales.April`
+ UNION ALL  Select * from `intense-palace-341711.Sales.June`
+ UNION ALL  Select * from `intense-palace-341711.Sales.July`
+ UNION ALL  Select * from `intense-palace-341711.Sales.aug`
+ UNION ALL  Select * from `intense-palace-341711.Sales.sept`
+ UNION ALL  Select * from `intense-palace-341711.Sales.oct`
+ UNION ALL  Select * from `intense-palace-341711.Sales.nov`
+ UNION ALL  Select * from `intense-palace-341711.Sales.dec`;
+
+
+ --- step 2 - CLACULATE RECENCY,FREQUENCY,MONETARY,r f m ranks
+
+
+ -- combine views with CTEs
+ create view `intense-palace-341711.Sales.rfm_metrics` AS
+ with current_date as (
+  select date('2026-03-06') as analysis_date --today's date
+ )
+ --below is again cte we dont need to use with again and again
+ ,rfm as (
+  select 
+   CustomerID,
+   MAX(OrderDate) as last_order_date,
+   date_diff((select analysis_date from current_date), MAX(OrderDate), day) as recency
+ -- now frequency count of all the orders by each customer 
+   ,COUNT(*) as frequency
+  -- now moentary sum of value or prices 
+   ,sum(OrderValue) AS monetary
+  FROM
+  `intense-palace-341711.Sales.Sales_2025`
+  GROUP BY
+   CustomerID 
+   )
+
+   SELECT 
+    rfm.*,
+    row_number() over(order by recency asc) as r_rank,
+    row_number() over (order by frequency desc) as f_rank,
+    row_number() over (order by monetary desc) as m_rank
+
+    from rfm;
+
+
+
+    -- step 3 - decile values (1 = worst - 10 = best)
+
+    create view `intense-palace-341711.Sales.rfm_scores`as
+    select * ,
+    ntile(10) over (order by r_rank desc) as r_score,
+    ntile(10) over (order by f_rank desc) as f_score,
+    ntile(10) over (order by m_rank desc) as m_score
+
+    from `intense-palace-341711.Sales.rfm_metrics`;
+
+    --- STEP 4 - TOTAL SCORE (R+F+M SCORE)
+    CREATE VIEW `intense-palace-341711.Sales.total_scores` as 
+      select 
+      CustomerID , recency,frequency,monetary,r_score,f_score,m_score,
+      (r_score + f_score + m_score ) as rfm_total_score
+      from
+      `intense-palace-341711.Sales.rfm_scores`;
+
+   --- step 5 - BI READY (CREATING SEGMENTS)
+
+   CREATE TABLE `intense-palace-341711.Sales.rfm_segments_final` as
+    select CustomerID , recency,frequency , monetary,r_score,f_score,m_score,rfm_total_score,
+    CASE
+     WHEN rfm_total_score >= 28 THEN 'Champions' -- 28-30
+     WHEN rfm_total_score >= 24 THEN 'Loyal VIPs'
+     WHEN rfm_total_score >= 20 THEN 'Potential Loyalists'
+     WHEN rfm_total_score >= 16 THEN 'Promising'
+    WHEN rfm_total_score >= 12 THEN 'Engaged'
+     WHEN rfm_total_score >= 8 THEN 'Requires Attention'
+     WHEN rfm_total_score >= 4 THEN 'At Risk'
+     ELSE 'Lost/Inactive'
+    END AS rfm_segment
+
+    from 
+    `intense-palace-341711.Sales.rfm_scores`
+
+    ORDER BY rfm_toal_score desc;
